@@ -1,5 +1,6 @@
 # MATLAB temporary files
 *.asv
+*.autosave
 *.m~
 *.mat
 *.slxc
@@ -20,3 +21,8 @@ slprj/
 # Operating system files
 .DS_Store
 Thumbs.db
+
+# Generated local datasets & extracted active model cache
+toolbox/universal_dataset/
+toolbox/exported_dataset/
+toolbox/active_model/
