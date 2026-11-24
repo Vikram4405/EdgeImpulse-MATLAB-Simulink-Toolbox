@@ -49,7 +49,7 @@ classdef EdgeImpulseUploader < handle
             end
             fs          = double(p.Results.Fs);
             category    = lower(strtrim(char(string(p.Results.Category))));
-            if ~ismember(category, {'training', 'testing'})
+            if ~ismember(category, {'training', 'testing', 'split'})
                 warning('EdgeImpulseUploader:InvalidCategory', ...
                     'Invalid Category ''%s''. Using ''training''.', category);
                 category = 'training';
@@ -159,7 +159,11 @@ classdef EdgeImpulseUploader < handle
                             'csv_path', csvFile, 'samples', numSamples, 'channels', numChannels);
 
             if ~isempty(obj.ApiKey)
-                result = obj.postJsonToCloud(jsonStr, [uniqueTag '.json'], label, category, result);
+                if strcmp(category, 'split')
+                    result = obj.postFileToCloud(jsonFile, [uniqueTag '.json'], 'application/json', label, 'split', result);
+                else
+                    result = obj.postJsonToCloud(jsonStr, [uniqueTag '.json'], label, category, result);
+                end
             else
                 fprintf('[EI Plugin 1] Saved Locally (No API Key set): %s (%d samples x %d ch @ %.1f Hz) -> %s\n', ...
                     upper(label), numSamples, numChannels, fs, csvFile);
@@ -179,7 +183,7 @@ classdef EdgeImpulseUploader < handle
                 label = 'sample';
             end
             category = lower(strtrim(char(string(p.Results.Category))));
-            if ~ismember(category, {'training', 'testing'})
+            if ~ismember(category, {'training', 'testing', 'split'})
                 category = 'training';
             end
 
@@ -230,7 +234,7 @@ classdef EdgeImpulseUploader < handle
                 label = 'sample';
             end
             category = lower(strtrim(char(string(p.Results.Category))));
-            if ~ismember(category, {'training', 'testing'})
+            if ~ismember(category, {'training', 'testing', 'split'})
                 category = 'training';
             end
             if ~isnumeric(fs) || ~isscalar(fs) || ~isfinite(fs) || fs <= 0

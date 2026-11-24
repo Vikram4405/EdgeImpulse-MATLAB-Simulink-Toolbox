@@ -76,6 +76,7 @@ function modelInfo = ei_import_model(zipOrFolderPath)
     fprintf('[2/4] Applying MSVC C++20 portability patches...\n');
     patchHeaderForMSVC(fullfile(sdkRoot, 'edge-impulse-sdk', 'dsp', 'config.hpp'));
     patchHeaderForMSVC(fullfile(sdkRoot, 'edge-impulse-sdk', 'porting', 'ei_classifier_porting.h'));
+    patchAnomalyHeaderForMSVC(fullfile(sdkRoot, 'model-parameters', 'anomaly_metadata.h'));
 
     fprintf('[3/4] Collecting full DSP & TFLite Micro C++ kernel suite...\n');
     mexCpp = fullfile(tbxDir, 'ei_universal_mex.cpp');
@@ -173,6 +174,7 @@ function modelInfo = ei_import_model(zipOrFolderPath)
     defFlags = {
         '-DEIDSP_QUANTIZE_FILTERBANK=0'
         '-DEI_CLASSIFIER_TFLITE_MICRO_C_H=1'
+        '-DEI_CLASSIFIER_ENABLE_DETECTION_POSTPROCESS_OP=1'
         '-DTF_LITE_STATIC_MEMORY=1'
         '-DTF_LITE_DISABLE_X86_NEON=1'
     };
@@ -180,7 +182,7 @@ function modelInfo = ei_import_model(zipOrFolderPath)
     cc = mex.getCompilerConfigurations('C++', 'Selected');
     if ~isempty(cc) && contains(cc.Name, 'Visual', 'IgnoreCase', true)
         % Use targeted '/wd...' instead of '/w' so cl.exe never prints 'warning D9025'
-        cxxFlags = {'COMPFLAGS="$COMPFLAGS /std:c++20 /EHsc /wd4244 /wd4267 /wd4305 /wd4018 /wd4996 /wd4101"'};
+        cxxFlags = {'COMPFLAGS="$COMPFLAGS /std:c++20 /EHsc /wd4244 /wd4267 /wd4305 /wd4018 /wd4996 /wd4101 /wd4146"'};
     else
         cxxFlags = {'CXXFLAGS="$CXXFLAGS -std=c++17 -w"'};
     end
@@ -198,13 +200,23 @@ function modelInfo = ei_import_model(zipOrFolderPath)
     fprintf('\n======================================================================\n');
     fprintf('  MODEL IMPORTED & COMPILED SUCCESSFULLY!                             \n');
     fprintf('----------------------------------------------------------------------\n');
-    fprintf('  Project Name    : %s (ID: %d)\n', modelInfo.project_name, modelInfo.project_id);
-    fprintf('  Input Channels  : %d channel(s)\n', modelInfo.num_channels);
-    fprintf('  Window Size     : %d samples (%.2f sec @ %g Hz)\n', ...
-        modelInfo.window_samples, modelInfo.window_samples / modelInfo.frequency_hz, modelInfo.frequency_hz);
-    fprintf('  Output Classes  : %d -> [%s]\n', ...
+    fprintf('  Project Name      : %s (ID: %d)\n', modelInfo.project_name, modelInfo.project_id);
+    fprintf('  Input Channels    : %d channel(s)\n', modelInfo.num_channels);
+    if modelInfo.frequency_hz > 0
+        fprintf('  Window Size       : %d samples (%.2f sec @ %g Hz)\n', ...
+            modelInfo.window_samples, modelInfo.window_samples / modelInfo.frequency_hz, modelInfo.frequency_hz);
+    else
+        fprintf('  Input Frame Size  : %d values (Image / Non-Time-Series)\n', modelInfo.frame_size);
+    end
+    fprintf('  Output Classes    : %d -> [%s]\n', ...
         modelInfo.num_classes, strjoin(modelInfo.labels, ', '));
-    fprintf('  Compiled Binary : %s.%s\n', outMex, mexext);
+    if isfield(modelInfo, 'has_anomaly') && modelInfo.has_anomaly
+        fprintf('  Anomaly Detection : ENABLED (K-means / GMM score returned in .anomaly)\n');
+    end
+    if isfield(modelInfo, 'is_object_detection') && modelInfo.is_object_detection
+        fprintf('  Object Detection  : ENABLED (FOMO / YOLO boxes returned in .bounding_boxes)\n');
+    end
+    fprintf('  Compiled Binary   : %s.%s\n', outMex, mexext);
     fprintf('======================================================================\n\n');
 end
 
@@ -219,4 +231,43 @@ function patchHeaderForMSVC(headerPath)
         fwrite(fid, [patchStr, txt], 'char');
         fclose(fid);
     end
+end
+
+function patchAnomalyHeaderForMSVC(headerPath)
+    % Converts GCC/C99 compound literals `( float[N] ) { ... }` inside
+    % Edge Impulse's generated anomaly_metadata.h into standard C++ static
+    % float arrays so MSVC (cl.exe) compiles K-means anomaly models cleanly
+    % without error C4576.
+    if ~isfile(headerPath)
+        return;
+    end
+    txt = fileread(headerPath);
+    pat = '\(\s*float\s*\[\s*(\d+)\s*\]\s*\)\s*\{([^}]+)\}';
+    [starts, ends, tokens] = regexp(txt, pat, 'start', 'end', 'tokens');
+    if isempty(starts)
+        return;
+    end
+
+    decls = cell(numel(starts), 1);
+    % Build replacement from back to front so indices stay valid
+    newTxt = txt;
+    for k = numel(starts):-1:1
+        arrLen  = tokens{k}{1};
+        arrVals = tokens{k}{2};
+        varName = sprintf('_ei_msvc_anom_c_%d', k);
+        decls{k} = sprintf('static float %s[%s] = {%s};\n', varName, arrLen, arrVals);
+        newTxt = [newTxt(1:starts(k)-1), varName, newTxt(ends(k)+1:end)];
+    end
+
+    declBlock = sprintf('// [MSVC C++ compatibility: hoisted from C99 compound literals]\n%s\n', strjoin(decls, ''));
+    anchor = regexp(newTxt, 'const\s+ei_classifier_anom_cluster_t', 'once');
+    if ~isempty(anchor)
+        newTxt = [newTxt(1:anchor-1), declBlock, newTxt(anchor:end)];
+    else
+        newTxt = [declBlock, newTxt];
+    end
+
+    fid = fopen(headerPath, 'w');
+    fwrite(fid, newTxt, 'char');
+    fclose(fid);
 end
