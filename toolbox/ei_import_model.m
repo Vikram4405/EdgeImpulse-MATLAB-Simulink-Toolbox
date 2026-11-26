@@ -35,8 +35,16 @@ function modelInfo = ei_import_model(zipOrFolderPath)
 
     % Unlock and unload any existing MEX binary in memory before recompiling
     try munlock('ei_universal_mex'); catch, end
-    clear ei_universal_mex;
-    try evalin('base', 'clear ei_universal_mex'); catch, end
+    clear('ei_universal_mex');
+    try evalin('base', 'munlock(''ei_universal_mex''); clear(''ei_universal_mex'');'); catch, end
+    existingMex = fullfile(tbxDir, ['ei_universal_mex.' mexext]);
+    if isfile(existingMex)
+        try
+            delete(existingMex);
+        catch
+            try clear mex; delete(existingMex); catch, end
+        end
+    end
 
     activeDir = fullfile(tbxDir, 'active_model');
 
@@ -191,7 +199,18 @@ function modelInfo = ei_import_model(zipOrFolderPath)
     fprintf('[4/4] Compiling all %d C++ source & kernel files (takes ~25 seconds, please wait)...\n', numel(allSources));
 
     mexArgs = [{'-silent', '-O'}, cxxFlags, incFlags', defFlags', {'-output', outMex}, allSources];
-    mex(mexArgs{:});
+    try
+        mex(mexArgs{:});
+    catch ME
+        if contains(ME.message, 'LNK1104')
+            error('EdgeImpulse:MEXLocked', ...
+                ['Cannot overwrite ei_universal_mex.%s because it is locked in memory ' ...
+                 '(by a running/paused Simulink model or another open MATLAB window).\n' ...
+                 'Fix: Stop any active simulation, run "clear mex" in your MATLAB Command Window, and try again.'], mexext);
+        else
+            rethrow(ME);
+        end
+    end
 
     modelInfo = ei_universal_mex('info');
     modelInfo.zip_path = zipOrFolderPath;

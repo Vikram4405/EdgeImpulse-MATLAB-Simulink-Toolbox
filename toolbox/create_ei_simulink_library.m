@@ -2,7 +2,7 @@
 % Creates the drag-and-drop Simulink Library 'EdgeImpulse_Library.slx'
 % containing BOTH flat (no-subsystem) blocks:
 %   1. 'EI_Data_Logger' (Plugin 1: Collects & uploads training signals to Edge Impulse)
-%   2. 'EI_Classifier'  (Plugin 2: Runs trained Edge Impulse C++ models live in Simulink)
+%   2. 'EI_Model'       (Plugin 2: Runs trained Edge Impulse C++ models live in Simulink)
 
 fprintf('=== Creating Drag-and-Drop Simulink Library: EdgeImpulse_Library.slx ===\n');
 
